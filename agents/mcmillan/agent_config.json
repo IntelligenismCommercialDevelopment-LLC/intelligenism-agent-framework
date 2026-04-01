@@ -1,0 +1,11 @@
+{
+  "display_name": "mcmillan",
+  "provider": "openrouter",
+  "model": "google/gemini-3-flash-preview",
+  "max_context": 200000,
+  "trim_strategy": "sliding_window",
+  "context_files": [
+    "SOUL.md"
+  ],
+  "skills": []
+}

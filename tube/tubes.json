@@ -1,0 +1,38 @@
+[
+  {
+    "id": "morning_news",
+    "enabled": true,
+    "triggers": [
+      { "type": "cron", "config": { "expr": "0 3 * * *" } },
+      { "type": "manual" }
+    ],
+    "steps": [
+      {
+        "type": "agent",
+        "id": "charlie",
+        "mode": "batch",
+        "payload": { "prompt": "搜集过去24小时的AI领域重要新闻，整理成简报" }
+      }
+    ]
+  },
+  {
+    "id": "doc_analysis_pipeline",
+    "enabled": false,
+    "triggers": [
+      { "type": "manual" }
+    ],
+    "steps": [
+      {
+        "type": "agent",
+        "id": "charlie",
+        "mode": "batch",
+        "payload": { "prompt": "处理并分析上传的文档" }
+      },
+      {
+        "type": "dispatch",
+        "id": "roundtable",
+        "payload": { "message": "基于文档分析结果进行头脑风暴讨论" }
+      }
+    ]
+  }
+]

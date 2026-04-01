@@ -1,0 +1,34 @@
+{
+  "display_name": "Roundtable Discussion",
+  "description": "Multi-agent roundtable discussion: user poses a question or proposal, multiple agents take turns responding based on their assigned roles",
+  "max_rounds": 3,
+  "max_history_tokens": 3000,
+  "trim_strategy": {
+    "keep_first_user_input": true,
+    "keep_last_user_input": true,
+    "drop_order": "oldest_first"
+  },
+  "agents": {
+    "charlie": {
+      "display_name": "Strategist",
+      "provider": "from_agent",
+      "model": "from_agent",
+      "context_files": [
+        "agents/charlie/SOUL.md",
+        "dispatch/roundtable/rules/charlie.md",
+        "dispatch/roundtable/staging/session_history.md"
+      ]
+    },
+    "mcmillan": {
+      "display_name": "Critic",
+      "provider": "from_agent",
+      "model": "from_agent",
+      "context_files": [
+        "agents/mcmillan/SOUL.md",
+        "dispatch/roundtable/rules/mcmillan.md",
+        "dispatch/roundtable/staging/session_history.md"
+      ]
+    }
+  },
+  "turn_order": ["charlie", "mcmillan"]
+}

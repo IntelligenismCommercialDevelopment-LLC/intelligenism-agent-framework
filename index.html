@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Intelligenism AGENTS Framework</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Press Start 2P', monospace;
+    background: #0a0a1a;
+    color: #e0e0e0;
+    min-height: 100vh;
+    image-rendering: pixelated;
+  }
+
+  /* ── Header ── */
+  #header {
+    padding: 36px 40px 24px;
+    border-bottom: 4px solid #33ff99;
+    background: linear-gradient(180deg, #0f1428 0%, #0a0a1a 100%);
+  }
+  #header h1 {
+    font-size: 24px;
+    color: #33ff99;
+    letter-spacing: 3px;
+    text-shadow: 3px 3px 0 #0a4a2a, 0 0 20px rgba(51,255,153,0.3);
+    line-height: 1.6;
+  }
+  #header p {
+    margin-top: 12px;
+    font-size: 12px;
+    color: #ffcc00;
+    text-shadow: 2px 2px 0 #4a3a00;
+  }
+
+  /* ── Stats bar ── */
+  #stats {
+    padding: 18px 40px;
+    font-size: 13px;
+    color: #cccccc;
+    border-bottom: 3px solid #222244;
+    display: flex;
+    gap: 32px;
+    background: #0d0d20;
+  }
+  .stat-item span {
+    color: #00ccff;
+    text-shadow: 0 0 8px rgba(0,204,255,0.4);
+  }
+
+  /* ── Page grid ── */
+  #page-grid {
+    padding: 36px 40px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 20px;
+  }
+
+  /* ── Page card ── */
+  .page-card {
+    display: block;
+    background: #111130;
+    border: 3px solid #4444aa;
+    padding: 24px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+    box-shadow: 4px 4px 0 rgba(68,68,170,0.3);
+  }
+  .page-card:hover {
+    border-color: #33ff99;
+    transform: translate(-2px, -2px);
+    box-shadow: 6px 6px 0 rgba(51,255,153,0.3);
+  }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .card-name {
+    font-size: 16px;
+    color: #ffffff;
+    text-shadow: 2px 2px 0 #222244;
+  }
+  .card-tag {
+    font-size: 9px;
+    padding: 4px 10px;
+    border: 2px solid;
+    letter-spacing: 1px;
+  }
+  .tag-builtin {
+    color: #33ff99;
+    border-color: #33ff99;
+    background: rgba(51,255,153,0.1);
+    text-shadow: 0 0 6px rgba(51,255,153,0.3);
+  }
+  .tag-user {
+    color: #ffcc00;
+    border-color: #ffcc00;
+    background: rgba(255,204,0,0.1);
+    text-shadow: 0 0 6px rgba(255,204,0,0.3);
+  }
+  .tag-dispatch {
+    color: #ff6699;
+    border-color: #ff6699;
+    background: rgba(255,102,153,0.1);
+    text-shadow: 0 0 6px rgba(255,102,153,0.3);
+  }
+
+  .card-desc {
+    font-size: 11px;
+    color: #aaaacc;
+    line-height: 2;
+  }
+  .card-url {
+    margin-top: 14px;
+    font-size: 10px;
+    color: #6666aa;
+  }
+
+  /* ── Empty state ── */
+  .empty-hint {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 60px 20px;
+    color: #666688;
+    font-size: 11px;
+    line-height: 2.5;
+  }
+  .empty-hint code {
+    background: #1a1a3a;
+    padding: 3px 10px;
+    border: 2px solid #4444aa;
+    color: #00ccff;
+  }
+
+  /* ── Footer ── */
+  #footer {
+    padding: 24px 40px;
+    border-top: 3px solid #222244;
+    font-size: 10px;
+    color: #555577;
+    text-align: center;
+    line-height: 2;
+  }
+  #footer code {
+    color: #33ff99;
+    background: #111130;
+    padding: 2px 8px;
+    border: 2px solid #33ff99;
+  }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>INTELLIGENISM AGENTS FRAMEWORK</h1>
+  <p>▶ Page Index</p>
+</div>
+
+<div id="stats">
+  <div class="stat-item">Pages: <span id="page-count">-</span></div>
+  <div class="stat-item">Agents: <span id="agent-count">-</span></div>
+  <div class="stat-item">Dispatch: <span id="dispatch-count">-</span></div>
+</div>
+
+<div id="page-grid"></div>
+
+<div id="footer">
+  Add pages → drop .html files into <code>pages/</code> directory → refresh
+</div>
+
+<script>
+const grid = document.getElementById('page-grid');
+const pageCount = document.getElementById('page-count');
+const agentCount = document.getElementById('agent-count');
+const dispatchCount = document.getElementById('dispatch-count');
+
+async function init() {
+  const [pagesRes, agentsRes, dispatchRes] = await Promise.all([
+    fetch('/api/pages').catch(() => null),
+    fetch('/api/agents').catch(() => null),
+    fetch('/api/dispatch').catch(() => null),
+  ]);
+
+  const pages = pagesRes ? await pagesRes.json() : [];
+  const agents = agentsRes ? await agentsRes.json() : [];
+  const dispatchData = dispatchRes ? await dispatchRes.json() : {};
+  const strategies = dispatchData.strategies || [];
+
+  pageCount.textContent = pages.length;
+  agentCount.textContent = agents.length;
+  dispatchCount.textContent = strategies.length;
+
+  if (pages.length === 0 && strategies.length === 0) {
+    grid.innerHTML = `
+      <div class="empty-hint">
+        No pages found.<br>
+        <code>chat.html</code> should be in the framework root.<br>
+        User pages go in <code>pages/</code> directory.
+      </div>`;
+    return;
+  }
+
+  pages.forEach(page => {
+    const card = document.createElement('a');
+    card.className = 'page-card';
+    card.href = page.url;
+
+    const tagClass = page.built_in ? 'tag-builtin' : 'tag-user';
+    const tagText = page.built_in ? 'BUILT-IN' : 'USER';
+    const desc = page.description || 'No description';
+
+    card.innerHTML = `
+      <div class="card-header">
+        <span class="card-name">${page.name}</span>
+        <span class="card-tag ${tagClass}">${tagText}</span>
+      </div>
+      <div class="card-desc">${desc}</div>
+      <div class="card-url">${page.url}</div>`;
+
+    grid.appendChild(card);
+  });
+
+  strategies.forEach(s => {
+    if (!s.has_ui) return;
+    const card = document.createElement('a');
+    card.className = 'page-card';
+    card.href = `/dispatch/${s.name}`;
+
+    card.innerHTML = `
+      <div class="card-header">
+        <span class="card-name">${s.display_name}</span>
+        <span class="card-tag tag-dispatch">DISPATCH</span>
+      </div>
+      <div class="card-desc">${s.description || 'Multi-agent collaboration'}</div>
+      <div class="card-url">/dispatch/${s.name}</div>`;
+
+    grid.appendChild(card);
+  });
+}
+
+init();
+</script>
+
+</body>
+</html>

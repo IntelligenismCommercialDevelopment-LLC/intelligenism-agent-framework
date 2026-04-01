@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+tube/tube_log.jsonl
+tube/manual_triggers/
+dispatch/*/sessions/
+dispatch/*/staging/
+agents/*/history.jsonl
+config.json
