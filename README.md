@@ -429,6 +429,15 @@ That's it.
 - **Website**: [intelligenism.club](https://intelligenism.club)
 - **Full Theory**: [intelligenism.org](https://intelligenism.org)
 
+---
+
+## Author
+
+Designed and created by **Minghai Zhuo**
+
+---
+
+
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE) for details.
