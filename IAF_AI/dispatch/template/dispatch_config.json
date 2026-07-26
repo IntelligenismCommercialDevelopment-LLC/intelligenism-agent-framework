@@ -1,0 +1,35 @@
+{
+  "display_name": "Template Dispatch",
+  "agent_id": "template",
+  "agents": {
+    "script_writer": {
+      "display_name": "Script Writer",
+      "provider": "openrouter",
+      "model": "google/gemini-3-flash-preview",
+      "temperature": 0.7,
+      "top_p": 0.95,
+      "role": "core",
+      "context_files": [
+        "../../../prompt_base/template/rules/persona.md"
+      ]
+    },
+    "v4_processor": {
+      "display_name": "V4 Processor",
+      "provider": "openrouter",
+      "model": "anthropic/claude-haiku-4-5-20251001",
+      "role": "processor"
+    }
+  },
+  "max_context": 200000,
+  "session_close": {
+    "enabled": false
+  },
+  "compaction": {
+    "enabled": false,
+    "trigger_threshold_tokens": 100000,
+    "exempt_min_rounds": 3,
+    "exempt_min_tokens": 6000,
+    "strategy": "merge_recompress",
+    "output_file": "session:staging/compacted_history.md"
+  }
+}

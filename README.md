@@ -1,445 +1,384 @@
 # Intelligenism Agent Framework (IAF)
 
-**A ~550-line Python agent framework built on [Intelligenism](https://intelligenism.org) theory. Each agent owns a complete copy of the engine. Additive complexity. True parallel execution. Folder = product.**
+**AI Operability Edition — v1.1**
 
-## What is IAF?
+IAF is a minimal, file-based framework for building **multi-agent collaboration modes** that are designed to be **operated and extended by AI agents themselves**, not just by humans.
 
-IAF is not just another multi-agent framework. It is the first practical implementation of **Intelligenism** — a theoretical framework on how intelligence emerges in organisations, whether human, artificial, or hybrid.
+A running IAF instance is just a directory. You create a new collaboration pattern by **copying a folder**, you give an agent new abilities by **dropping a `*_tools.py` file into it**, and you reconfigure the whole system by **editing plain JSON** — no framework code changes required. Every extension point has an explicit contract and a machine-checkable validator, so an LLM can safely read the system, modify it, and verify its own work.
 
-Most multi-agent frameworks hardcode a specific collaboration paradigm into the framework itself. CrewAI is role-playing sequential execution. AutoGen is multi-round dialogue with consensus convergence. If you could swap these out, these frameworks would lose their reason to exist.
+---
 
-IAF practises **possibility management**: each agent owns a complete, independent copy of the entire engine. You can modify any line of code, making any agent fundamentally different from any other — without risking impact on other agents. Adding an agent is copying a folder. Adding a collaboration mode is adding a folder. Complexity grows additively, never multiplicatively.
+## Table of Contents
 
-> From single neurons to complex neural networks, intelligence exhibits a bottom-up construction pattern. The complexity and intelligence potential of a neural network comes from the connections between individuals, not from making the individuals internally more complex. Therefore, maintaining the independence of individuals or small units, and expressing complexity outside the individual, is the essence of connectionism.
->
-> — *Thinking, Conception and Construction of Intelligenism*
+- [Core Concepts](#core-concepts)
+- [Why "AI Operability Edition"](#why-ai-operability-edition)
+- [Architecture: the Shell Four-Zone Layout](#architecture-the-shell-four-zone-layout)
+- [Repository Layout](#repository-layout)
+- [Quick Start](#quick-start)
+- [The Dispatch Kernel](#the-dispatch-kernel)
+- [Creating a New Dispatch](#creating-a-new-dispatch)
+- [Writing Tools](#writing-tools)
+- [Configuration Reference](#configuration-reference)
+- [AI-Operability Tooling](#ai-operability-tooling)
+- [Running as a Server](#running-as-a-server-optional)
+- [Design Principles](#design-principles)
 
-## Current Status: v1.0
+---
 
-- ✅ **Agent Layer (Fundamental Loop)** — complete and functional
-- ✅ **Dispatch Layer (Roundtable strategy)** — complete and functional
-- ✅ **Tube Layer (Signal Topology)** — complete and functional
-- ✅ **UI Layer (Yellow Pages + Chat + Tube Dashboard)** — complete and functional
-- ✅ **Shared Infrastructure** (llm_client + token_utils) — complete
-- ✅ **Agent Toolset** (file / shell / tube / dispatch) — complete
-- ✅ **CLI Entry Points** — standardised
-- ✅ **Architecture Validation Tests** — complete
+## Core Concepts
+
+| Term | Meaning |
+|------|---------|
+| **Dispatch** | A *collaboration mode* — one self-contained pattern of how one or more agents cooperate to do a job (e.g. a chat agent, a script-writer → critic → scorer pipeline, a free-search researcher). Each dispatch is a folder under `IAF_AI/dispatch/`. |
+| **Agent** | A single configured LLM persona *inside* a dispatch, defined by an entry in `dispatch_config.json` under `agents` (its provider, model, system context, tools). One dispatch can host several agents. |
+| **Tool** | A Python function an agent can call, exported from a `*_tools.py` file via a `TOOLS` dict. Auto-discovered — no registration code. |
+| **Shell** | The four-zone project layout (`config_base` / `prompt_base` / `workspace` / `IAF_AI`) that separates *what you edit* from *the engine that runs*. |
+| **Engine** | `IAF_AI/` — the runtime. **You never edit it.** It is driven entirely by config and prompts. |
+
+The central idea: **a dispatch is a copyable unit.** To build a new kind of agent collaboration, you copy the `template` dispatch, adjust its config and prompts, and it runs. Dozens or hundreds of specialized dispatches can be spun off the same prototype.
+
+---
+
+## Why "AI Operability Edition"
+
+This edition is tuned so that an **AI agent can operate the framework end-to-end**:
+
+- **Explicit contracts.** [`TOOL_CONTRACT.md`](TOOL_CONTRACT.md) specifies exactly how a new tool file must be written, so an LLM can author one correctly on the first try.
+- **Machine-checkable validation.** [`validate.py`](IAF_AI/validate.py) reports `OK` or a precise list of `FAIL` reasons — an agent can self-check after editing.
+- **A machine-readable system map.** [`generate_manifest.py`](IAF_AI/generate_manifest.py) emits `MANIFEST.json` describing every dispatch, agent, and tool — an agent can discover the system without reading source.
+- **Config/engine separation.** All edits happen in `config_base/` and `prompt_base/` (plain JSON and Markdown). The engine is a black box, so an agent cannot break the runtime by reconfiguring it.
+- **Copy-to-extend.** New capability = a copied folder or a dropped-in file, never a patch to core code.
+
+In short: the framework's extension surface is small, declarative, contract-bound, and verifiable — the properties an autonomous agent needs to modify a system safely.
+
+---
+
+## Architecture: the Shell Four-Zone Layout
+
+An IAF instance separates configuration, prompts, outputs, and the engine into four zones:
+
+```
+{iaf_instance}/
+├── chain.py                 # Headless run entry (sync → dispatch → workspace)
+├── sync_config.py           # Propagates config_base → engine internals
+│
+├── config_base/             # ZONE 1 — CONFIG (source of truth; humans/agents edit here)
+│   ├── config.json          #   Global provider & service credentials
+│   └── {dispatch}/
+│       └── dispatch_config.json
+│
+├── prompt_base/             # ZONE 2 — PROMPTS (the only home for prompt/rule files)
+│   └── {dispatch}/
+│       └── rules/*.md
+│
+├── workspace/               # ZONE 3 — OUTPUTS (run artifacts land here)
+│   └── {dispatch}/
+│
+└── IAF_AI/                  # ZONE 4 — ENGINE (runtime; never edited by hand)
+    ├── dispatch/{dispatch}/ #   Per-dispatch kernel + its generated config
+    ├── lib/                 #   llm_client, token_utils
+    ├── validate.py          #   Contract validator
+    └── generate_manifest.py #   System-map generator
+```
+
+**The flow of truth is one-directional:**
+
+```
+   config_base/  ──sync_config.py──►  IAF_AI/dispatch/{name}/dispatch_config.json
+   config_base/config.json ─────────►  IAF_AI/config.json
+   prompt_base/  ──(referenced directly, no sync)──►  read at runtime by the engine
+```
+
+Four rules make this work:
+
+1. **`config_base/` is the source of truth.** Humans and agents only ever edit files here.
+2. **`prompt_base/` is the single home for prompts.** A dispatch's `context_files` point straight at it; editing a prompt takes effect immediately, **no sync needed**.
+3. **Engine-internal config is generated.** `IAF_AI/.../dispatch_config.json` and `IAF_AI/config.json` are written by `sync_config.py`. Never hand-edit them — they get overwritten.
+4. **The engine is never modified.** `dispatch.py`, `dispatch_base.py`, and tool code stay untouched across every specialization.
+
+### Path translation
+
+`sync_config.py` translates the `context_files` paths in `config_base/{dispatch}/dispatch_config.json` from **shell-root-relative** (convenient to write) into **engine-dispatch-relative** (what the runtime needs). Because a dispatch directory (`IAF_AI/dispatch/{name}/`) sits three levels below the shell root, the translation prepends `../../../`:
+
+| Path form in `config_base` | Example | Sync behavior |
+|----------------------------|---------|---------------|
+| Absolute | `/abs/path/to/wiki/soul.md` | Left unchanged |
+| Prefixed | `wiki:...`, `session:...`, `briefs:...` | Left unchanged (resolved at runtime) |
+| Shell-root-relative | `prompt_base/chat/rules/persona.md` | Prepended with `../../../` |
+| Shell-root-relative (parent) | `../shared/data.md` | Prepended with `../../../` |
+
+The `session:` prefix is special: it resolves to the current run's session directory, so an agent can read files produced earlier in the same session.
+
+---
+
+## Repository Layout
+
+```
+.
+├── chain.py                          # Headless entry
+├── sync_config.py                    # config_base → engine sync
+├── config_base/                      # Config source of truth
+│   ├── config.json
+│   └── template/
+├── prompt_base/                      # Prompt files
+│   └── template/rules/
+├── workspace/                        # Run outputs
+├── TOOL_CONTRACT.md                  # Contract for writing tools
+└── IAF_AI/                           # ENGINE
+    ├── chain.py
+    ├── dispatch_routes.py            # Flask blueprint (server/UI mode)
+    ├── validate.py                   # Contract validator
+    ├── generate_manifest.py          # System-map generator
+    ├── config.example.json           # Provider config template
+    ├── requirements.txt
+    ├── lib/
+    │   ├── llm_client.py             # Multi-provider LLM calls + retries
+    │   └── token_utils.py            # Token estimation
+    └── dispatch/
+        └── template/                 # The copyable prototype dispatch
+            ├── dispatch.py           #   Kernel (TemplateDispatch)
+            ├── dispatch_base.py      #   Tool loop, endpoint resolution
+            ├── dispatch_config.json  #   (generated by sync)
+            ├── compaction.py         #   Context compaction
+            ├── session_io.py         #   Session/history storage
+            ├── session_manager.py
+            ├── session_close.py
+            ├── runtime.py            #   Per-run event/sid state
+            ├── v4_processor.py       #   Single-call summarizer service
+            ├── context/              #   Sliding-window context helpers
+            └── tools/                #   Example tools (see below)
+```
+
+---
 
 ## Quick Start
 
-```bash
-# Clone the repo
-git clone https://github.com/IntelligenismCommercialDevelopment-LLC/intelligenism-agent-framework.git
-cd intelligenism-agent-framework
-
-# Set up virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install flask requests croniter
-
-# Configure your LLM provider (see Configuration below)
-# Edit config.json with your API key
-
-# Start the server
-python3 chat_server.py
-
-# Open http://localhost:5000
-```
-
-Every time you open a new terminal, activate the environment first:
+### 1. Install
 
 ```bash
-cd intelligenism-agent-framework
-source venv/bin/activate
-python3 chat_server.py
+cd IAF_AI
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt      # requests, flask, croniter
 ```
 
-## Configuration
+### 2. Configure providers
 
-Edit `config.json` in the project root:
+Copy the example config and fill in your API keys:
+
+```bash
+cp IAF_AI/config.example.json config_base/config.json
+```
+
+`config.json` holds provider endpoints/keys and optional service keys (see [Configuration Reference](#configuration-reference)). **This file contains secrets — keep it out of version control.**
+
+### 3. Run a dispatch
+
+```bash
+python3 chain.py --dispatch template --agent script_writer --message "Hello"
+```
+
+`chain.py` runs the full cycle: **sync config → instantiate the dispatch → execute the agent → write outputs to `workspace/{dispatch}/`**, and prints the result.
+
+---
+
+## The Dispatch Kernel
+
+Every dispatch's `dispatch.py` exposes the same kernel class, `TemplateDispatch`, with a stable API:
+
+```python
+disp = TemplateDispatch(agent_dir)        # load dispatch_config.json
+disp.new_session(agent_name="script_writer")  # start a session
+disp.append_to_history("user", "...")         # inject input
+result = disp.run(agent_name="script_writer")  # → {text_response, tool_calls, duration_ms}
+disp.close_session()
+# convenience: disp.run_single_message("...")  does new→inject→run→close in one call
+```
+
+Inside `run()`, each turn:
+
+1. **Builds context** from the agent's `context_files` — regular files are concatenated into the system prompt; `*_tools.json` files are loaded as external tool definitions.
+2. **Loads conversation history**, transparently excluding rounds already folded into a compaction summary.
+3. **Runs a tool loop** against the LLM (`call_with_tool_loop`), executing tool calls until the agent finishes or an exit-tool fires.
+4. **Records** the response to session history and returns a structured result.
+
+The kernel has **two tool-loading modes**, chosen by config:
+
+- **Standard mode** (chat / pipeline / TCR): loads the dispatch's local `tools/*_tools.py` plus any external `_tools.json` tools. Used for structured cooperation where agents call domain tools.
+- **Free-search mode** (set `free_search.free_search_path` on the agent): loads a **path-fenced** file-exploration toolset via `explore_tools.make_tools(read_roots, write_root)` — the agent can read within allowed roots and write to a single output path, ideal for autonomous research/summarization.
+
+**Multi-provider** is built in: the same agent config runs on `openrouter`, `openai`, `xai`, or `anthropic`; the kernel adapts tool-call semantics per provider, and [`lib/llm_client.py`](IAF_AI/lib/llm_client.py) handles endpoints, retries, and token accounting.
+
+---
+
+## Creating a New Dispatch
+
+*(This section folds in the former Chinese “IAF Shell 改造指引.”)*
+
+To build a new collaboration mode, **copy the `template` dispatch and wire up its Shell zones.**
+
+### Step 1 — Copy the prototype
+
+```bash
+cp -R IAF_AI/dispatch/template IAF_AI/dispatch/{new_name}
+```
+
+### Step 2 — Create the Shell folders
+
+```bash
+mkdir -p config_base/{new_name}
+mkdir -p prompt_base/{new_name}/rules
+mkdir -p workspace/{new_name}
+```
+
+### Step 3 — Place prompts in `prompt_base`
+
+Move every prompt/rule file out of the engine and into `prompt_base/{new_name}/rules/`. Prompts live **only** here; the engine reads them directly at runtime.
+
+### Step 4 — Write `config_base/{new_name}/dispatch_config.json`
+
+Define the dispatch's agents. Point each agent's `context_files` at `prompt_base` using **shell-root-relative** paths (sync will translate them):
+
+```json
+{
+  "agent_id": "my_dispatch",
+  "agents": {
+    "script_writer": {
+      "provider": "openrouter",
+      "model": "google/gemini-3-flash-preview",
+      "context_files": [
+        "prompt_base/my_dispatch/rules/persona.md",
+        "prompt_base/my_dispatch/rules/task.md"
+      ]
+    }
+  },
+  "compaction": { "enabled": false }
+}
+```
+
+Absolute paths and prefixed paths (`wiki:`, `session:`, `briefs:`) are left as-is; only shell-root-relative paths are rewritten.
+
+### Step 5 — Sync and verify
+
+```bash
+python3 sync_config.py          # generate engine-internal config
+python3 IAF_AI/validate.py all  # expect: OK
+```
+
+After sync, confirm that the engine's `dispatch_config.json` has `context_files` prefixed with `../../../`, that absolute/prefixed paths were left untouched, and that `IAF_AI/config.json` was written.
+
+> **Notes**
+> - Editing a **prompt** never requires a re-sync — it is read live. Only **config** changes need `python3 sync_config.py`.
+> - The engine-internal `dispatch_config.json` is intentionally overwritten by sync. Always edit the copy in `config_base/`.
+> - A single `config.json` in `config_base/` is shared by all dispatches; `sync_config.py` walks every subfolder of `config_base/` and syncs each dispatch.
+
+---
+
+## Writing Tools
+
+Give an agent a new ability by dropping a file into its `tools/` directory. The full rules are in [`TOOL_CONTRACT.md`](TOOL_CONTRACT.md); the essentials:
+
+- **File name** must end in `_tools.py` (others are ignored by discovery).
+- **Export a module-level `TOOLS` dict.** Each entry needs `description`, `parameters` (OpenAI function-calling JSON Schema), and a `handler`.
+- **The handler takes one `dict` and returns a `str`** — success text, or a string beginning with `"Error: "` on failure. It must catch its own exceptions, never call `exit()`, set timeouts on long operations, and truncate output beyond ~5000 chars.
+- **No registration needed** — the engine auto-discovers `tools/*_tools.py` and merges every `TOOLS` entry.
+
+```python
+"""Example tool: greeting generator."""
+
+def _greet(args):
+    name = args.get("name", "World")
+    return f"Hello, {name}!"
+
+TOOLS = {
+    "greet": {
+        "description": "Generate a greeting message for the given name.",
+        "parameters": {
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "Name to greet"}},
+        },
+        "handler": _greet,
+    }
+}
+```
+
+Validate it: `python3 IAF_AI/validate.py tool` → `OK`.
+
+The `template` dispatch ships example tools that demonstrate the patterns: `file_tools.py` (read/write), `explore_tools.py` (path-fenced free search), and `propose_tools.py` / `score_tools.py` / `bet_tools.py` with their `emit_*_tools.json` counterparts (structured multi-agent actions).
+
+---
+
+## Configuration Reference
+
+### `config.json` (global — one per instance)
 
 ```json
 {
   "providers": {
-    "openrouter": {
-      "url": "https://openrouter.ai/api/v1/chat/completions",
-      "key": "your-openrouter-api-key"
-    }
+    "openrouter": { "url": "https://openrouter.ai/api/v1/chat/completions", "key": "..." },
+    "xai":        { "url": "https://api.x.ai/v1/chat/completions", "api_key": "...", "model": "..." },
+    "openai":     { "url": "https://api.openai.com/v1/responses", "api_key": "...", "model": "..." },
+    "anthropic":  { "url": "https://api.anthropic.com/v1/messages", "api_key": "...", "model": "..." }
   },
   "default_provider": "openrouter",
-  "default_model": "google/gemini-3-flash-preview"
+  "default_model": "google/gemini-3-flash-preview",
+  "services": {
+    "jina_reader":  { "url": "https://r.jina.ai/", "api_key": "..." },
+    "brave_search": { "url": "https://api.search.brave.com/res/v1/web/search", "api_key": "..." }
+  }
 }
 ```
 
-IAF connects to LLMs via [OpenRouter](https://openrouter.ai/), which gives you access to Gemini, Claude, GPT, Qwen, and many other models through a single API key. You can add multiple providers and override models per agent in each agent's `agent_config.json`.
-
-## Four-Layer Architecture
-
-The framework consists of four fully independent layers. Units within each layer are also isolated from each other. The four layers communicate through Flask APIs and the filesystem — no layer invades another.
-
-| Layer | What It Does | Unit Granularity | Self-Containment |
-|---|---|---|---|
-| **Agent Layer** | Complete runtime for a single intelligent agent | One folder = one agent | Copy the folder to deploy |
-| **Dispatch Layer** | Multi-agent collaboration orchestration | One folder = one collaboration strategy | Copy the folder to deploy |
-| **Tube Layer** | Signal topology — wiring between building blocks | One JSON entry = one signal pathway | Edit JSON to activate |
-| **UI Layer** | Human-machine interaction interfaces | One HTML file = one feature page | Drop the file to use |
-
-Plus cross-cutting infrastructure:
-
-- **chat_server.py** — Router + Tube Runner bootstrap (no business logic)
-- **tube_routes.py** — Tube Layer Flask Blueprint
-- **dispatch_routes.py** — Dispatch Layer Flask Blueprint
-
-## Agent Layer
-
-The core of IAF: the **Fundamental Loop**. Each agent is a self-contained runtime (~267 lines of engine code):
-
-- **LLM Communication** — Message assembly, API calls via OpenRouter, structured response handling
-- **Tool Executor** — Auto-discovery registry, whitelist-based execution, tool call loop
-- **Context Management** — Sliding-window trimming strategy, chat history persistence
-- **Identity & Knowledge** — Configurable `context_files` loads any `.md` files as system prompt
-- **Skills** — Trigger-based dynamic injection of task instructions
-
-### build_messages: Five-Layer Assembly Model
-
-| Layer | Source | When Loaded | Purpose |
-|---|---|---|---|
-| 1 | All files listed in `context_files` | Every call | Agent's identity, knowledge, routing |
-| 2 | Skill `.md` files matched by trigger rules | On keyword match | Scenario-specific task instructions |
-| 3 | `history.jsonl` | Chat mode only | Conversation memory |
-| 4 | Current user message | Every call | This turn's input |
-| 5 | Trim pass | Every call | Ensure context fits the window |
-
-### Agent Capability Model
-
-| Layer | Carrier | When Loaded | Analogy |
-|---|---|---|---|
-| Identity & Knowledge | `context_files` (.md) | Every call | Knowledge in the brain |
-| Conditional Instructions | `skills` (.md + trigger rules) | On keyword match | Conditioned reflexes |
-| Execution Ability | `tools` (*_tools.py) | Every call (schema injected) | Hands and feet |
-
-### Available Tool Files
-
-| File | Tools | Capability | Ships by Default |
-|---|---|---|---|
-| file_tools.py | read_file, write_file, list_dir | Read/write files, list directories | Yes |
-| shell_tools.py | run_shell | Execute terminal commands | No |
-| tube_tools.py | trigger_tube, list_tubes, tube_log | Trigger tubes, check status, read logs | No |
-| dispatch_tools.py | run_dispatch, list_dispatch_strategies | Initiate multi-agent collaboration | No |
-
-Drop a tool file into `agents/xxx/tools/` — auto-discovered, zero code changes.
-
-### Agent Run Modes
-
-| Mode | Context Source | Typical Caller |
-|---|---|---|
-| chat | Loads history.jsonl + context_files + skills | chat_server.py (user interaction) |
-| batch | Clean context: context_files + skills only, no history | tube_runner (scheduled tasks) |
-
-## Dispatch Layer
-
-The Dispatch Layer implements multi-agent collaboration. It calls `lib/llm_client.call_llm()` directly — it does not go through the Agent engine. Agent folders are treated as "asset libraries + model config", not as executors.
-
-> *Analogy: Agents are actors, Dispatch is the director. The director has actors read their own persona (SOUL.md) but can also hand them an entirely new script. The performance records on set belong to the director (sessions/), not the actor's personal diary (history.jsonl).*
-
-### Dispatch Folder Structure
-
-| File | Role |
-|---|---|
-| dispatch.py | Orchestration logic: round control, agent call order, termination conditions |
-| dispatch_base.py | Infrastructure: tool loop, LLM parsing, staging |
-| context_injector.py | Context assembly: reads agent files per config |
-| session_manager.py | Session CRUD |
-| dispatch_config.json | Participating agents, context_files, round limits |
-| rules/*.md | Agent role definitions within the collaboration |
-| sessions/ | Complete records of collaboration processes |
-| *.html | (Optional) Dedicated UI page |
-
-### Three-Layer Context Isolation
-
-| Context Type | Owned By | Storage Location | Purpose |
-|---|---|---|---|
-| Agent chat history | Agent | agents/xxx/history.jsonl | User-agent interaction memory |
-| Dispatch collaboration record | Dispatch | dispatch/xxx/sessions/*.jsonl | Multi-agent collaboration process |
-| Per-call context | context_injector | In memory (not persisted) | Assembly result for a single LLM call |
-
-Agents are unaware they participated in a Dispatch. Dispatch never touches an agent's `history.jsonl`. Isolation is an architectural guarantee.
-
-## Tube Layer
-
-Tube is the framework's third dimension — the **signal topology layer**. It describes signal pathways between building blocks: when a condition is met, trigger a target to execute.
-
-### Why Tubes Matter
-
-Existing multi-agent frameworks share a common problem: the pipes between building blocks are cast in place.
-
-| Dimension | CrewAI / LangGraph / Manus | Intelligenism |
-|---|---|---|
-| Collaboration protocol | Built-in fixed patterns / fixed three-role | dispatch/ pluggable folders |
-| Signal topology | Hardcoded, untouchable | tubes.json declarative rewiring |
-
-Same three agents plus two dispatches — different Tube configurations produce entirely different system behaviour: serial pipelines, parallel fan-out, feedback loops. The blocks haven't changed; the wiring has, and so the system behaves completely differently.
-
-### Tube Anatomy
-
-A Tube consists of three elements:
-
-| Element | Description |
-|---|---|
-| Triggers | What condition activates it (pluggable modules: cron, manual, API, file watch, etc.) |
-| Steps | What to do sequentially after activation (Agent, Dispatch, another Tube) |
-| Payload | Data passed from trigger source to target (prompt, file path, upstream output, etc.) |
-
-### tubes.json — Single Source of Topology Truth
-
-```json
-[
-  {
-    "id": "doc_analysis_pipeline",
-    "enabled": true,
-    "triggers": [
-      { "type": "cron", "config": { "expr": "30 9 * * *" } },
-      { "type": "manual" }
-    ],
-    "steps": [
-      { "type": "agent", "id": "doc_processor", "mode": "batch",
-        "payload": { "prompt": "Process and analyse documents" } },
-      { "type": "dispatch", "id": "roundtable",
-        "payload": { "message": "Brainstorm based on analysis results" } },
-      { "type": "tube", "id": "send_report" }
-    ]
-  }
-]
-```
-
-### Trigger Sources
-
-| Source | Triggered By | Mechanism |
-|---|---|---|
-| Cron | tube_runner (automatic) | croniter time comparison, 15-second polling |
-| API | Human / AI agent / external system | POST /api/tube/trigger → flag file |
-| Tube chain | Upstream tube step | steps with type=tube → inline execution |
-
-### Drive Targets
-
-| Target Type | Execution |
-|---|---|
-| Agent | subprocess → run_agent.py |
-| Dispatch | subprocess → run_dispatch.py |
-| Tube | Inline recursive execution (depth limit: 5) |
-| Custom | Drop .py in targets/, implement build_command() |
-
-### Execution Model
-
-- **Subprocess isolation:** tube_runner only spawns subprocesses, never imports business code
-- **Serial steps:** Next step runs only if previous exits with code 0
-- **Parallel tubes:** Different tubes execute in independent threads, non-blocking
-- **Duplicate prevention:** running_tubes dictionary prevents re-firing the same tube
-- **Hot reload:** tubes.json is re-read every polling cycle — no restart needed
-- **Fire-and-forget:** Triggering does not block the main loop
-
-### Tube API Endpoints
-
-| Method | Path | Function |
-|---|---|---|
-| GET | /api/tubes | List all tubes + real-time status |
-| GET | /api/tube/status | Lightweight status query |
-| POST | /api/tube/trigger | Manual trigger |
-| GET | /api/tube/log | Query logs (supports filtering) |
-| GET | /api/tube/log/grouped | Logs grouped by tube |
-| DELETE | /api/tube/log | Clear logs |
-
-## UI Layer
-
-A browser-based interface following the yellow-pages architecture. Every HTML page is a fully self-contained page. Zero coupling between pages. No unified SPA shell, no shared router.
-
-| Type | Location | Route |
-|---|---|---|
-| Yellow pages | index.html | GET / |
-| Basic chat | chat.html | GET /chat |
-| User pages | pages/*.html | GET /pages/\<name\> |
-| Dispatch UI | dispatch/xxx/*.html | GET /dispatch/\<name\> |
-| Tube dashboard | pages/tube-dashboard.html | GET /pages/tube-dashboard |
-
-The **Tube Dashboard** provides: tube list with live status, manual trigger buttons, expandable config details and step payloads, real-time scrolling execution logs, and per-tube log clearing. Auto-polls every 10 seconds.
-
-## AI Operability
-
-IAF is not just "an AI framework for humans" — it is **an AI framework that AI can also operate**. The design features — minimal codebase, filesystem communication, JSON declarative config, process isolation — make the framework fully controllable by both carbon-based and silicon-based intelligence.
-
-A top-tier AI agent taking over a framework must pass four gates: understand, modify, deploy, monitor. IAF is clear on every gate:
-
-| Gate | IAF | Traditional Frameworks |
-|---|---|---|
-| Understand | ~550 lines, fits in one context window | 10,000+ lines, requires modular comprehension |
-| Modify | Edit JSON and Markdown files | Write Python/SDK code conforming to framework constraints |
-| Deploy | `python3 chat_server.py` — one command | docker compose / kubernetes |
-| Monitor | `cat tube_log.jsonl` — plain text | Dedicated dashboards / monitoring APIs |
-
-## Directory Structure
-
-```
-intelligenism-agent-framework/
-│
-├── config.json                     # Global config (provider connections)
-│
-├── lib/                            # Shared infrastructure
-│   ├── llm_client.py               # HTTP LLM calls + retry + error classification
-│   └── token_utils.py              # Token estimation
-│
-├── template/                       # Fundamental Loop template (copy to create agents)
-│   ├── core/
-│   │   ├── direct_llm.py           # Engine core (~267 lines)
-│   │   └── tool_executor.py        # Tool auto-discovery registry
-│   ├── tools/
-│   │   └── file_tools.py           # Default tool set
-│   ├── context/
-│   │   └── sliding_window.py       # Default trimming strategy
-│   ├── skills/                     # Empty directory (populate per agent)
-│   ├── SOUL.md                     # Identity template
-│   └── agent_config.json           # Agent config template
-│
-├── agents/                         # Agent instance directory
-│   └── default/                    # (same structure as template/)
-│
-├── dispatch/                       # Collaboration strategy library
-│   └── roundtable/                 # Roundtable discussion strategy
-│       ├── dispatch.py             # Orchestration logic
-│       ├── dispatch_base.py        # Infrastructure (tool loop, LLM parsing)
-│       ├── context_injector.py     # Context assembly
-│       ├── session_manager.py      # Session management
-│       ├── dispatch_config.json    # Participating agents + file read rules
-│       ├── context/                # Dispatch-specific trimming
-│       ├── rules/                  # Agent role definitions
-│       ├── sessions/               # Collaboration records
-│       ├── staging/                # Runtime temporary files
-│       └── roundtable.html         # Dedicated UI page
-│
-├── tube/                           # Signal topology layer
-│   ├── tube_runner.py              # Main loop engine
-│   ├── triggers/                   # Pluggable trigger sources
-│   │   ├── cron.py                 # Cron scheduling
-│   │   └── manual.py              # Manual / API trigger
-│   ├── targets/                    # Pluggable drive targets
-│   │   ├── agent.py                # Drive agent
-│   │   └── dispatch.py             # Drive dispatch
-│   ├── run_agent.py                # Agent CLI entry
-│   ├── run_dispatch.py             # Dispatch CLI entry
-│   ├── tubes.json                  # Single source of topology truth
-│   ├── tube_log.jsonl              # Execution log
-│   └── manual_triggers/            # Flag file directory
-│
-├── chat_server.py                  # Web server / router + Tube Runner
-├── dispatch_routes.py              # Dispatch Flask Blueprint
-├── tube_routes.py                  # Tube Flask Blueprint
-├── index.html                      # Yellow pages (feature index)
-├── chat.html                       # Basic chat interface
-├── pages/                          # User-created pages
-│   └── tube-dashboard.html         # Tube monitoring panel
-└── tests/
-    └── test_template.py
-```
-
-## Four Orthogonal Extension Dimensions
-
-The framework's four extension dimensions are fully orthogonal — a change in any one dimension does not affect the other three:
-
-| Operation | How | Code Changes |
-|---|---|---|
-| Add new agent | `cp -r template/ agents/xxx/` | 0 lines |
-| Add tool to agent | Drop `.py` in `agents/xxx/tools/` | 0 lines |
-| Add knowledge to agent | Add `.md` file, update `context_files` in agent_config.json | 0 lines |
-| Add skill to agent | Drop `.md` in `agents/xxx/skills/`, add trigger rule | 0 lines |
-| Change trimming strategy | Swap `.py` in `agents/xxx/context/` | 0 lines |
-| Add collaboration mode | Add folder in `dispatch/` | 0 lines |
-| Add signal pathway | Add entry in `tube/tubes.json` | 0 lines |
-| Add trigger type | Drop `.py` in `tube/triggers/` | 0 lines |
-| Add drive target | Drop `.py` in `tube/targets/` | 0 lines |
-| Add LLM provider | Add entry in `config.json` | 0 lines |
-| Add UI page | Drop `.html` in `pages/` | 0 lines |
-
-## Tradeable Product Units
-
-The framework produces four types of tradeable product units:
-
-| Product Unit | Form | Use Case |
-|---|---|---|
-| Agent | Folder | Domain-specific agents (news gathering, code review, translation, etc.) |
-| Dispatch | Folder | Collaboration strategies (brainstorm, debate, serial conversion, etc.) |
-| Tube | JSON config | Signal topology recipes and trigger chain designs |
-| HTML | File | Purpose-built human-machine interaction interfaces |
-
-## Tech Stack
-
-Pure Python + HTML. No Node.js, no npm, no frontend build tools.
-
-```
-pip install flask requests croniter
-```
-
-That's it.
-
-## Why Not CrewAI / AutoGen / LangGraph / Manus?
-
-| Dimension | CrewAI / AutoGen / LangGraph | Manus | IAF |
-|---|---|---|---|
-| Code size | 10,000+ lines | Closed source | ~550 lines |
-| Engine model | One shared engine | Fixed three-role | Each agent gets independent engine |
-| Complexity growth | Multiplicative | Hidden internally | Additive |
-| Parallelism | Async pseudo-parallel | Cloud parallel | Multi-process true parallel |
-| Fault isolation | None (one crash = all crash) | Unknown | Complete isolation |
-| Customisability | Within config parameters | Not customisable | Any line of code |
-| Collaboration paradigm | Hardcoded in framework | Fixed three-role | Pluggable, independent folders |
-| Signal topology | Hardcoded | Hardcoded | tubes.json declarative rewiring |
-| AI operability | Difficult (10k+ lines + SDK) | Impossible (closed source) | Fully operable (550 lines + filesystem) |
-| Product unit | Code (hard to circulate) | SaaS service | Folder / JSON entry (tradeable) |
-| Dependencies | Many third-party libraries | N/A | flask + requests + croniter |
-
-## Mapping to Intelligenism Theory
-
-| Intelligenism Concept | Architectural Implementation |
-|---|---|
-| Autonomous units of intelligent consortiums | Each agent's independent Fundamental Loop |
-| Carbon-silicon symbiosis, loose coupling | Process isolation + filesystem communication + AI operability |
-| Pluggable collaboration paradigms | Independent strategy folders under dispatch/ |
-| Rewirable signal topology | Declarative configuration via tubes.json |
-| Deterministic scheduling without LLM | Tube orchestration is pure Python, not probabilistic LLM judgment |
-| Possibility management over determinism | Copy full code instead of parameterised configuration |
-| Value is in the wiring, not the blocks | Agent + Dispatch + Tube assembly knowledge is the competitive moat |
-
-## Key Design Principles
-
-- **Stateless API:** LLMs don't remember previous conversations. Full context is re-sent every call.
-- **LLM decides, code executes:** LLMs return structured JSON tool requests, not executable code.
-- **Auto-discovery pattern:** Tools, trimming strategies, agents, pages, trigger sources, drive targets — all discovered by scanning directories.
-- **Layered isolation:** Each layer only knows its adjacent layer. Four layers + three-layer context isolation.
-- **Process isolation:** Each agent, each Tube step runs in an independent process.
-- **Filesystem communication:** Agents communicate via files. Naturally debuggable, future-distributable.
-- **Possibility management:** Copy full code instead of parameterised configuration.
-- **Folder as product:** Agents, Dispatches, HTML pages are independently distributable product units.
-- **Additive complexity:** Adding agents, collaboration modes, tubes, pages — all additive.
-- **Declarative topology:** tubes.json is the single source of signal topology truth.
-- **AI operable:** Both carbon-based and silicon-based intelligence can fully control the framework.
-- **Dual-side pluggable:** Tube input side (triggers/) and output side (targets/) are both extend-by-dropping-files.
-
-## Links
-
-- **Website**: [intelligenism.club](https://intelligenism.club)
-- **Full Theory**: [intelligenism.org](https://intelligenism.org)
+### `dispatch_config.json` (per dispatch)
+
+Key fields:
+
+| Field | Purpose |
+|-------|---------|
+| `agent_id` | Identifier recorded on this dispatch's outputs. |
+| `agents.{name}` | One agent config: `provider`, `model`, `temperature`, `top_p`, `max_tokens`, `reasoning`, `context_files`. |
+| `agents.{name}.context_files` | Ordered list of files → system prompt (and `_tools.json` → external tools). |
+| `agents.{name}.free_search` | Optional; enables free-search mode with `free_search_path` (read roots) and `output_path`. |
+| `compaction` | Optional context-compaction settings (`enabled`, thresholds). |
 
 ---
 
-## Author
+## AI-Operability Tooling
 
-Designed and created by **Minghai Zhuo**
+| Command | Purpose |
+|---------|---------|
+| `python3 IAF_AI/validate.py dispatch` | Check every dispatch: config present, valid JSON, `dispatch.py` present, `context_files` resolve. |
+| `python3 IAF_AI/validate.py tool` | Check every `*_tools.py`: imports cleanly, exports a `TOOLS` dict, each entry has `description`/`parameters`/callable `handler`. |
+| `python3 IAF_AI/validate.py all` | Both. Prints `OK` or a precise `FAIL` list. |
+| `python3 IAF_AI/generate_manifest.py` | Write `MANIFEST.json` — a machine-readable map of dispatches, agents, and tools. |
+
+These give an operating agent a **read → modify → verify** loop it can run without human help.
 
 ---
 
+## Running as a Server (optional)
 
-## License
+Beyond headless `chain.py`, the engine ships a Flask blueprint, [`dispatch_routes.py`](IAF_AI/dispatch_routes.py), that auto-discovers dispatches and exposes them over HTTP (create session, send message, fetch history) plus per-dispatch UI pages. Mount it in a host Flask app:
 
-Apache 2.0 — see [LICENSE](LICENSE) for details.
+```python
+from dispatch_routes import dispatch_bp
+app.register_blueprint(dispatch_bp)
+```
 
-© 2025-2026 Intelligenism Commercial Development LLC
+> The host server app is not included in this template — `dispatch_routes.py` is provided as the integration surface for embedding IAF into a web service.
+
+---
+
+## Design Principles
+
+1. **A dispatch is a copyable folder.** Specialization is duplication + reconfiguration, never a fork of the engine.
+2. **Config is the source of truth; the engine is a black box.** Edits are declarative and reversible.
+3. **Every extension point has a contract and a validator.** Tools, dispatches, and config are all machine-checkable.
+4. **Prompts are live; config is synced.** Fast iteration on behavior, deliberate changes to structure.
+5. **Provider-agnostic.** Swap models/providers per agent with a config edit.
+
+---
+
+## License & Versioning
+
+This is the **AI Operability Edition, v1.1** of the Intelligenism Agent Framework.

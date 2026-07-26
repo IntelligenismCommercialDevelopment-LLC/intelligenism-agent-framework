@@ -1,10 +1,18 @@
-venv/
+# Python
 __pycache__/
 *.pyc
+.venv/
+venv/
+
+# macOS
 .DS_Store
-tube/tube_log.jsonl
-tube/manual_triggers/
-dispatch/*/sessions/
-dispatch/*/staging/
-agents/*/history.jsonl
+
+# Secrets — real provider config (use config.example.json as the template)
 config.json
+
+# Runtime session data & generated artifacts
+IAF_AI/dispatch/*/sessions/
+IAF_AI/dispatch/*/staging/
+workspace/*/output_*.md
+workspace/*/tool_calls_*.json
+MANIFEST.json
