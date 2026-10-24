@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Validation CLI for IAF AI v1.1.
+Validation CLI for IAF AI v2.0.
 
 Usage:
     python3 validate.py dispatch      # validate all dispatch strategies
@@ -86,12 +86,7 @@ def validate_tools():
                 continue
 
             if not hasattr(module, "TOOLS"):
-                # Factory-style tool files (path-fenced free-search tools) export a
-                # make_tools() factory instead of a module-level TOOLS dict. The engine
-                # loads these via make_tools(read_roots, write_root), so accept them.
-                if callable(getattr(module, "make_tools", None)):
-                    continue
-                errors.append(f"[tool:{name}/{fname}] missing TOOLS dict or make_tools() factory")
+                errors.append(f"[tool:{name}/{fname}] missing TOOLS dict")
                 continue
 
             if not isinstance(module.TOOLS, dict):

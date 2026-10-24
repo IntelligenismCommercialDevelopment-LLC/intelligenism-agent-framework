@@ -1,5 +1,5 @@
 """
-Template Dispatch — Backend dispatch unit for one agent.
+Presentation Dispatch — Backend dispatch unit for presentation pipeline agents.
 
 Public API:
     TemplateDispatch(agent_dir) — Initialize dispatch for one agent
@@ -67,6 +67,25 @@ def _read_context_file(dispatch_dir, path, sid):
         return ""
 
 
+def _expand_ctx_dirs(dispatch_dir, context_files, sid):
+    """context_files 里指向【目录】的条目 → 展开为该目录顶层文件（排序·不递归·跳过子目录）；
+    文件条目原样保留。返回 dispatch_dir 相对路径列表。纯加法：只有目录条目受影响。"""
+    _expanded = []
+    for _p in context_files:
+        try:
+            _r = _resolve_context_path(dispatch_dir, _p, sid)
+        except Exception:
+            _r = None
+        if _r and os.path.isdir(_r):
+            for _n in sorted(os.listdir(_r)):
+                _fp = os.path.join(_r, _n)
+                if os.path.isfile(_fp):
+                    _expanded.append(os.path.relpath(_fp, dispatch_dir))
+        else:
+            _expanded.append(_p)
+    return _expanded
+
+
 def _build_context(dispatch_dir, context_files, sid):
     """
     Read context_files and split:
@@ -79,7 +98,7 @@ def _build_context(dispatch_dir, context_files, sid):
     system_parts = []
     external_tools = []
 
-    for path in context_files:
+    for path in _expand_ctx_dirs(dispatch_dir, context_files, sid):
         content = _read_context_file(dispatch_dir, path, sid)
         if not content:
             continue
@@ -96,7 +115,8 @@ def _build_context(dispatch_dir, context_files, sid):
             except json.JSONDecodeError:
                 pass
         else:
-            system_parts.append(content)
+            _lbl = os.path.basename(_resolve_context_path(dispatch_dir, path, sid) or path)
+            system_parts.append(f"# [{_lbl}]\n\n{content}")
 
     system = "\n\n---\n\n".join(system_parts) if system_parts else "You are a helpful assistant."
     return system, external_tools
@@ -168,7 +188,7 @@ def _load_dispatch_tools(dispatch_dir):
         try:
             spec.loader.exec_module(module)
         except Exception as e:
-            print(f"[template dispatch] Could not load {filepath}: {e}")
+            print(f"[presentation dispatch] Could not load {filepath}: {e}")
             continue
 
         tools_dict = getattr(module, "TOOLS", None)
@@ -193,11 +213,11 @@ def _load_dispatch_tools(dispatch_dir):
 
 
 # ---------------------------------------------------------------------------
-# External tool handler — for external tools defined in _tools.json
+# External tool handler — for game tools defined in _tools.json
 # ---------------------------------------------------------------------------
 
 def _make_external_tool_handler(tool_name):
-    """Create a handler for external tools (declarative actions) that acknowledges
+    """Create a handler for external tools (game actions) that acknowledges
     the call without executing anything. The Engine interprets these."""
     def handler(args):
         return json.dumps(
@@ -234,7 +254,7 @@ def _save_reasoning_if_configured(response_meta, reasoning_config,
 
     usage = response_meta.get("usage", {})
 
-    # 从 agent_dir 推导 step 名：.../4_score/dispatch/{name}/ → "4_score"
+    # 从 agent_dir 推导 step 名：.../<step>/dispatch/<agent>/ → "<step>"
     step_name = os.path.basename(os.path.dirname(os.path.dirname(agent_dir)))
 
     # 解析 reasoning_tokens（兼容不同响应格式）
@@ -279,14 +299,14 @@ def _save_reasoning_if_configured(response_meta, reasoning_config,
 # ---------------------------------------------------------------------------
 
 class TemplateDispatch:
-    """Pure backend dispatch unit for one agent.
+    """Pure backend dispatch unit for one agent of one collaboration mode.
 
     Usage:
-        disp = TemplateDispatch("dispatch/template")
-        disp.new_session("session_001")
-        disp.append_to_history("user", "... input / instructions ...")
-        result = disp.run()
-        print(result["tool_calls"])
+        disp = TemplateDispatch("IAF_AI/dispatch/template")
+        disp.new_session(agent_name="core")
+        disp.append_to_history("user", "... task instructions ...")
+        result = disp.run(agent_name="core")
+        print(result["text_response"], result["tool_calls"])
         disp.close_session()
     """
 
@@ -328,7 +348,7 @@ class TemplateDispatch:
 
     def new_session(self, session_id: str = None, agent_name: str = "core_chat"):
         """
-        Start a new session.
+        Start a new session (corresponds to one game).
         Clears staging, creates new session record.
 
         Returns:
@@ -357,7 +377,7 @@ class TemplateDispatch:
 
         Returns:
             dict: {
-                "tool_calls": [{"name": "submit_action", "input": {"target": "..."}}],
+                "tool_calls": [{"name": "submit_vote", "input": {"target": "agent_005"}}],
                 "text_response": "...",
                 "duration_ms": N,
             }
@@ -422,7 +442,7 @@ class TemplateDispatch:
         # --- Load tools (mode-dependent) ---
         free_search = agent_conf.get("free_search")
 
-        if free_search and free_search.get("free_search_path"):
+        if free_search and (free_search.get("free_search_path") or free_search.get("write_allow")):
             # ═══ FREE SEARCH MODE ═══
             # Load explore_tools.py with path fencing via factory
             import importlib.util as _ilu
@@ -456,7 +476,7 @@ class TemplateDispatch:
             exit_tools = {"write_file"} if free_search.get("exit_on_write", True) else None
 
         else:
-            # ═══ STANDARD MODE (TCR / chat / interview) ═══
+            # ═══ STANDARD MODE (chat / pipeline / domain tools) ═══
             tool_definitions, tool_functions = _load_dispatch_tools(self.agent_dir)
 
             # Register external tools with acknowledgment handlers
@@ -468,7 +488,7 @@ class TemplateDispatch:
                     tool_definitions.append(ext_tool)
 
             # Determine tool_choice based on provider
-            # Only force tool use when external action tools are present
+            # Only force tool use when external game tools are present
             tc = None
             if external_tools and tool_definitions:
                 if provider in ("openrouter", "openai", "xai"):
@@ -479,6 +499,29 @@ class TemplateDispatch:
             exit_tools = ({t["function"]["name"] for t in external_tools}
                           if external_tools else None)
             max_loops = 10
+
+            # ── 实时 STATUS 轨迹:STANDARD MODE 自定义工具默认不发事件,补一层 handler 包裹
+            #    (与 explore_tools 同款·best-effort·缺 status_log 静默降级),让工具循环逐工具实时落 STATUS。
+            #    母版内置 → 从此 cp 出、配成 STANDARD 模式的新器官自带逐事件实时 STATUS。
+            try:
+                import time as _sl_time
+                import status_log as _sl
+            except Exception:
+                _sl = None
+            if _sl is not None:
+                def _wrap_sl(_h, _nm):
+                    def _inner(inp):
+                        _sl.tool_start(_nm, inp)
+                        _t0 = _sl_time.time()
+                        try:
+                            out = _h(inp)
+                        except Exception as e:
+                            _sl.tool_done(_nm, _sl_time.time() - _t0, err=e)
+                            raise
+                        _sl.tool_done(_nm, _sl_time.time() - _t0, out=out)
+                        return out
+                    return _inner
+                tool_functions = {_n: _wrap_sl(_h, _n) for _n, _h in tool_functions.items()}
 
         # --- Set runtime context ---
         runtime.clear_events()
@@ -504,6 +547,7 @@ class TemplateDispatch:
                 top_p=top_p,
                 reasoning=reasoning,
                 max_tokens=max_tokens,
+                provider_routing=agent_conf.get("provider_routing"),
             )
         finally:
             runtime.drain_events()
@@ -537,7 +581,7 @@ class TemplateDispatch:
         )
 
         # --- Build structured result ---
-        # Only return external action tools to the engine; filter out internal file tools.
+        # Only return game action tools to the engine; filter out internal file tools.
         tool_calls = []
         for th in tool_history:
             if not exit_tools or th["tool"] in exit_tools:
@@ -552,14 +596,19 @@ class TemplateDispatch:
             "duration_ms": duration_ms,
         }
 
-    def append_to_history(self, role: str, content: str):
+    def append_to_history(self, role: str, content):
         """
         Append a message to conversation history.
-        Engine uses this to inject state/input before calling run().
+        Engine uses this to inject game state before calling run().
 
         Args:
             role: "user" or "assistant"
-            content: Message content
+            content: 字符串，或多模态 parts 列表（带图入料时 —— 拼装器在
+                shell 的 tools/_shared/image_parts.py）。两种都原样落盘、原样进
+                messages：引擎不解释 content，_load_conversation_history 逐字透传，
+                lib/llm_client 的 chat-completions 分支也逐字透传。
+                ★只会读文本的旁路（会话标题、token 估算、历史渲染）各自过
+                _content_text —— 别在新代码里直接对 content 做字符串操作。
         """
         if not self.session_id:
             raise RuntimeError("No active session.")
@@ -590,7 +639,7 @@ class TemplateDispatch:
             for _event in session_close.close(self.session_id, self.project_root):
                 pass  # consume generator events silently
         except Exception as e:
-            print(f"[template dispatch] Session close error: {e}")
+            print(f"[presentation dispatch] Session close error: {e}")
         finally:
             self.session_id = None
 
@@ -701,6 +750,7 @@ class TemplateDispatch:
             top_p=top_p,
             reasoning=reasoning,
             max_tokens=max_tokens,
+            provider_routing=agent_conf.get("provider_routing"),
         )
         duration_ms = int((time.time() - t0) * 1000)
 

@@ -1,28 +1,53 @@
 {
+  "_note": "最小通用占位槽。新建 IAF = 整体复制本模板后在这里定制（provider/model、真实 context_files、role、compaction、固定目标工具）。core agent 的键名是 'core'，与引擎 dispatch.py 的默认 agent_name、chain.py 的 --agent 缺省值三处必须逐字一致；换键名要同时改那两处。★provider 写 'deepseek' 时走官方直连端点，model 不带供应商前缀（'deepseek-flash' 而不是 'deepseek/deepseek-flash'），并且不要配 provider_routing —— 那是 OpenRouter 专属路由字段，直连时 lib/llm_client 会整个丢掉它，留着只是个骗人的死键。",
   "display_name": "Template Dispatch",
   "agent_id": "template",
+  "can_hold_mic": false,
   "agents": {
-    "script_writer": {
-      "display_name": "Script Writer",
-      "provider": "openrouter",
-      "model": "google/gemini-3-flash-preview",
-      "temperature": 0.7,
+    "core": {
+      "display_name": "Core Agent",
+      "provider": "deepseek",
+      "model": "deepseek-flash",
+      "temperature": 0.5,
       "top_p": 0.95,
       "role": "core",
+      "reasoning": {
+        "effort": "high",
+        "exclude": false,
+        "max_tokens": null
+      },
       "context_files": [
         "../../../prompt_base/template/rules/persona.md"
-      ]
+      ],
+      "free_search": {
+        "_note": "通用 free-search 能力槽（参考 thinker/deliberator）。默认读围栏空（read_allow/free_search_path=[] → 无只读探索工具·配合读侧治本），写落 workspace/current，exit_on_write=true（首次 write_file 即结束）。新器官按需：填 read_allow/free_search_path 开读、改 write_allow/output_path 改写落点。★跨界约定（rebuild_plan0905·I1+P1）：器官恒住 <cluster_root>/<group>/<unit>_iaf（depth-2），故要够集群级共享物（如 search_material/summarized_data_base）时相对路径写 ../../<target>（两层出到集群根）；within-organ 路径如 workspace/current 不带 ../。",
+        "free_search_path": [],
+        "read_allow": [],
+        "write_allow": [
+          "workspace/current"
+        ],
+        "output_path": "workspace/current",
+        "max_read_tokens": 120000,
+        "max_tool_loops": 20,
+        "tool_choice": "auto",
+        "exit_on_write": true,
+        "can_delete": false
+      }
     },
     "v4_processor": {
       "display_name": "V4 Processor",
-      "provider": "openrouter",
-      "model": "anthropic/claude-haiku-4-5-20251001",
+      "provider": "deepseek",
+      "model": "deepseek-flash",
       "role": "processor"
     }
   },
   "max_context": 200000,
   "session_close": {
     "enabled": false
+  },
+  "v4_rules": {
+    "_note": "跨轮压缩的规则文件。路径【相对引擎 dispatch 目录】解析（v4_processor._resolve_rules_path），正本放 prompt_base/{dispatch}/rules/，由 sync_config.py 的 _sync_rules 下发。sync_config 不翻译这个键，别写 shell-root 相对路径；也别写绝对路径（违反集群副本安全铁律）。",
+    "compact": "rules/compact_v4.md"
   },
   "compaction": {
     "enabled": false,

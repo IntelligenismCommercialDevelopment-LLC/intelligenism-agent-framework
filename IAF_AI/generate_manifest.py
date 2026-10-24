@@ -56,7 +56,7 @@ def generate():
     """Build and write MANIFEST.json."""
     manifest = {
         "framework": "IAF",
-        "version": "1.1",
+        "version": "2.0",
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
 
         "structure": {

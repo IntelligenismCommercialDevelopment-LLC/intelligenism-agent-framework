@@ -16,8 +16,9 @@ import time
 _DISPATCH_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(_DISPATCH_DIR))
 
+
 # Make lib/ importable for llm_client
-_LIB_DIR = os.path.join(_PROJECT_ROOT, "lib")
+_LIB_DIR = os.path.join(_PROJECT_ROOT, "lib")   # 本模板自带的 lib（为什么不上溯：见 dispatch_base.get_llm_caller）
 if _LIB_DIR not in sys.path:
     sys.path.insert(0, _LIB_DIR)
 

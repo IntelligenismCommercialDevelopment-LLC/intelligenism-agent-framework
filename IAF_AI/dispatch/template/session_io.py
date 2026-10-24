@@ -132,6 +132,20 @@ def delete_session(dispatch_root, sid):
 # History
 # ---------------------------------------------------------------------------
 
+def _content_text(content):
+    """取 content 里的纯文本。content 可能是字符串，也可能是多模态 parts 列表
+    （chain 带图入料时就是列表，见 tools/_shared/image_parts.py）。
+    ★只会读文本的旁路（会话标题、token 估算、把历史渲染成 markdown）都必须过这一道：
+      直接 .strip() 会在列表上抛 AttributeError，直接塞进 f-string 会把整串 base64
+      按 repr 写进文件。图片不贡献文本 —— 它按服务端的每图计费口径算，不按字符数算。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(p.get("text", "") for p in content
+                          if isinstance(p, dict) and p.get("type") == "text")
+    return ""
+
+
 def append_history(dispatch_root, sid, record):
     """Append one record to history.jsonl. Also updates last_activity in meta
     and (for the first user_input) fills title_hint."""
@@ -152,7 +166,7 @@ def append_history(dispatch_root, sid, record):
     if record.get("type") == "user_input":
         # Fill title_hint if it is still default
         if meta.get("title_hint") in ("", "新会话", None):
-            content = (record.get("content") or "").strip().replace("\n", " ")
+            content = _content_text(record.get("content")).strip().replace("\n", " ")
             meta["title_hint"] = content[:30] or "新会话"
 
     if record.get("type") == "agent_response":

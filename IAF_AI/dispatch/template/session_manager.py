@@ -143,6 +143,20 @@ def delete_session(sessions_dir, session_id):
     os.remove(filepath)
 
 
+def _content_text(content):
+    """取 content 里的纯文本。content 可能是字符串，也可能是多模态 parts 列表
+    （chain 带图入料时就是列表，见 tools/_shared/image_parts.py）。
+    ★只会读文本的旁路（会话标题、token 估算、把历史渲染成 markdown）都必须过这一道：
+      直接 .strip() 会在列表上抛 AttributeError，直接塞进 f-string 会把整串 base64
+      按 repr 写进文件。图片不贡献文本 —— 它按服务端的每图计费口径算，不按字符数算。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(p.get("text", "") for p in content
+                          if isinstance(p, dict) and p.get("type") == "text")
+    return ""
+
+
 def format_session_history(records):
     """
     Format session records into a readable markdown string for injection
@@ -166,13 +180,13 @@ def format_session_history(records):
         rtype = record.get("type", "")
 
         if rtype == "user_input":
-            content = record.get("content", "")
+            content = _content_text(record.get("content"))
             parts.append(f"[User]: {content}\n")
 
         elif rtype == "agent_response":
             name = record.get("display_name", record.get("agent_id", "Agent"))
             round_num = record.get("round", "?")
-            content = record.get("content", "")
+            content = _content_text(record.get("content"))
             parts.append(f"[{name}] (Round {round_num}): {content}\n")
 
         elif rtype == "round_complete":

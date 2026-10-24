@@ -24,6 +24,20 @@ _DEFAULT_STRATEGY = {
 }
 
 
+def _content_text(content):
+    """取 content 里的纯文本。content 可能是字符串，也可能是多模态 parts 列表
+    （chain 带图入料时就是列表，见 tools/_shared/image_parts.py）。
+    ★只会读文本的旁路（会话标题、token 估算、把历史渲染成 markdown）都必须过这一道：
+      直接 .strip() 会在列表上抛 AttributeError，直接塞进 f-string 会把整串 base64
+      按 repr 写进文件。图片不贡献文本 —— 它按服务端的每图计费口径算，不按字符数算。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(p.get("text", "") for p in content
+                          if isinstance(p, dict) and p.get("type") == "text")
+    return ""
+
+
 def estimate_tokens(text):
     """
     Estimate token count from text. Uses a blended heuristic:
@@ -56,7 +70,7 @@ def trim_records(records, max_tokens=3000, trim_strategy=None):
         strategy.update(trim_strategy)
 
     # Estimate current total
-    total_text = " ".join(r.get("content", "") for r in records)
+    total_text = " ".join(_content_text(r.get("content")) for r in records)
     current_tokens = estimate_tokens(total_text)
 
     if current_tokens <= max_tokens:
@@ -148,7 +162,7 @@ def trim_records(records, max_tokens=3000, trim_strategy=None):
         kept_records = _assemble(
             protected_head, rounds, kept_rounds, protected_tail, dropped_count
         )
-        text = " ".join(r.get("content", "") for r in kept_records)
+        text = " ".join(_content_text(r.get("content")) for r in kept_records)
         if estimate_tokens(text) <= max_tokens:
             break
 

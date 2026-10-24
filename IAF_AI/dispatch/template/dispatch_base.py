@@ -51,7 +51,15 @@ def _staging_dir():
 
 def get_llm_caller(project_root):
     """Import and return lib.llm_client.call_llm from the project.
-    Returns None if not available (allows testing with mock)."""
+    Returns None if not available (allows testing with mock).
+
+    lib 的落点 = <project_root>/lib，即本模板自带的 IAF_AI/lib/。
+    ★刻意不上溯去找集群共享的那一份：本模板是「整体复制出一个新 IAF」的母版，
+      拷到集群外、拷到任何深度都要能自己跑起来；靠上溯找 marker 的话，拷出去就
+      只剩一条退路，而那条退路通向一个不存在的目录 —— 结果是本函数返回 None，
+      LLM 悄悄不可用（静默降级）。
+    代价写在这儿：lib 里的修复不会自动流到已经拷出去的副本，要逐份带过去。
+    """
     try:
         lib_path = os.path.join(project_root, "lib")
         if lib_path not in sys.path:
@@ -188,6 +196,7 @@ def call_with_tool_loop(
     call_llm_fn, tool_definitions, tool_functions,
     max_tool_loops=10, tool_choice=None, exit_on_tools=None,
     temperature=None, top_p=None, reasoning=None, max_tokens=None,
+    provider_routing=None,
 ):
     """
     Call LLM with tool loop support.
@@ -222,7 +231,8 @@ def call_with_tool_loop(
     if not tool_definitions or not tool_functions:
         response = call_llm_fn(url, key, model, messages,
                                temperature=temperature, top_p=top_p,
-                               reasoning=reasoning, max_tokens=max_tokens)
+                               reasoning=reasoning, max_tokens=max_tokens,
+                               provider_routing=provider_routing)
         content = _extract_text(response)
         return content, tool_history, _extract_response_meta(response)
 
@@ -235,6 +245,7 @@ def call_with_tool_loop(
             tools=tool_definitions, tool_choice=tool_choice,
             temperature=temperature, top_p=top_p,
             reasoning=reasoning, max_tokens=max_tokens,
+            provider_routing=provider_routing,
         )
         response_meta = _extract_response_meta(response)
 
@@ -283,7 +294,8 @@ def call_with_tool_loop(
 
             # Append assistant's tool request + tool result to messages
             # for the next LLM call
-            messages.append({
+            # ★DeepSeek 思考模式:带 tool_calls 的 assistant 消息必须回传 reasoning_content，否则下一轮 400。
+            _assistant_msg = {
                 "role": "assistant",
                 "content": None,
                 "tool_calls": [{
@@ -294,7 +306,11 @@ def call_with_tool_loop(
                         "arguments": json.dumps(tool_input, ensure_ascii=False),
                     },
                 }],
-            })
+            }
+            _rc = response.get("reasoning_content") if isinstance(response, dict) else None
+            if _rc:
+                _assistant_msg["reasoning_content"] = _rc
+            messages.append(_assistant_msg)
             messages.append({
                 "role": "tool",
                 "tool_call_id": tool_id,

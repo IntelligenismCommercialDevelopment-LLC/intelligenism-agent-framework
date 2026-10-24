@@ -1,4 +1,4 @@
-# Tool File Contract — IAF AI v1.1
+# Tool File Contract — IAF AI v1.0
 
 > 外部 LLM 为 agent 编写新工具时，必须遵循本文档规定的格式。
 

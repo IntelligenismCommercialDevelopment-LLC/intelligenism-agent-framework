@@ -24,6 +24,7 @@ import time
 _DISPATCH_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(_DISPATCH_DIR))
 
+
 if _DISPATCH_DIR not in sys.path:
     sys.path.insert(0, _DISPATCH_DIR)
 
@@ -57,7 +58,7 @@ def _progress(step, step_name, status, detail="", **extra):
 
 def _estimate_tokens(text):
     try:
-        lib_path = os.path.join(_PROJECT_ROOT, "lib")
+        lib_path = os.path.join(_PROJECT_ROOT, "lib")   # 本模板自带的 lib（为什么不上溯：见 dispatch_base.get_llm_caller）
         if lib_path not in sys.path:
             sys.path.insert(0, lib_path)
         from token_utils import estimate_tokens
@@ -113,7 +114,7 @@ def _call_llm_single(raw_text, rules_file, provider, model):
     ]
 
     try:
-        lib_path = os.path.join(_PROJECT_ROOT, "lib")
+        lib_path = os.path.join(_PROJECT_ROOT, "lib")   # 本模板自带的 lib（为什么不上溯：见 dispatch_base.get_llm_caller）
         if lib_path not in sys.path:
             sys.path.insert(0, lib_path)
         from llm_client import call_llm

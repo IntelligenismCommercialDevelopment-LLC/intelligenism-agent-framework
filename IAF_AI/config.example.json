@@ -4,6 +4,10 @@
       "url": "https://openrouter.ai/api/v1/chat/completions",
       "key": "your-api-key-here"
     },
+    "deepseek": {
+      "url": "https://api.deepseek.com/chat/completions",
+      "key": "your-api-key-here"
+    },
     "xai": {
       "url": "https://api.x.ai/v1/chat/completions",
       "api_key": "your-api-key-here",
